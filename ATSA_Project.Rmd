@@ -1,0 +1,381 @@
+---
+title: "ATSA_Project"
+author: "Mihir Godia"
+date: "02/12/2019"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Importing Libraries
+
+```{r}
+  library(astsa)
+  library(TSA)
+  library(sapa)
+  library(forecast)
+  library(R.utils)
+  library(imputeTS)
+  library(padr)
+  library(chron)
+  library(AnalyzeTS)
+```
+
+# Importing Data
+### (Answer 1)
+The data is read into a variable called 'data' and relevant information is extracted from it.
+
+```{r}
+  data = read.csv('SHAR_MAY15_JULY7.csv')
+  relevant_data = data[c(5,6,9,13)]
+```
+
+# Data Manipulation
+## Identifying Missing Times and Days
+###(Answer 2)
+
+To curb the problem of missing entries, the existing data is converted into a form which the 'pad function' can understand. Pad function is used to insert missing entires in time series data with either a value or, in our case, NA.
+
+```{r}
+  flag1 = 1
+  dategmt = data[6]
+  timegmt = data[5]
+  for(ii in relevant_data$TIME.GMT.){
+    if(ii%/%10 >= 1){
+      relevant_data$TIME.GMT.[flag1] = paste0(relevant_data$TIME.GMT.[flag1], ":00")
+    } else {
+      relevant_data$TIME.GMT.[flag1] = paste0("0", relevant_data$TIME.GMT.[flag1], ":00")
+    }
+    flag1 = flag1 + 1
+  }
+  
+```
+
+```{r}
+  humidity = relevant_data$HUMIDITY...
+  temp = relevant_data$AIR_TEMP.Â.C.
+  datetime = paste(relevant_data$DATE.GMT., relevant_data$TIME.GMT.)
+  day = as.POSIXct(datetime, format='%m/%d/%Y %H:%M')
+  df1 = data.frame(day, humidity)
+  pad_day_humidity = df1 %>% pad
+  df2 = data.frame(day, temp)
+  pad_day_temp = df2 %>% pad
+  working_data = data.frame(Date_Time = pad_day_humidity$day, Humidity = pad_day_humidity$humidity, Temperature = pad_day_temp$temp)
+  non_imputed_humidity = working_data$Humidity
+```
+
+## Filling Missing Data
+### (Answer 3)
+
+```{r}
+  working_data$Humidity = na_interpolation(working_data$Humidity, option = 'linear', maxgap = Inf)
+  working_data$Temperature = na_interpolation(working_data$Temperature, option = 'linear', maxgap = Inf)
+```
+
+# Train Test Split
+### (Answer 3)
+
+```{r}
+  train_humidity = working_data$Humidity[1:1200]
+  test_humidity = working_data$Humidity[1201:1296]
+
+  train_temp = working_data$Temperature[1:1200]
+  test_temp = working_data$Temperature[1201:1296]
+```
+
+# Creating Time Series Objects
+### (Answer 4)
+
+```{r}
+  train_humidity = ts(train_humidity)
+  test_humidity = ts(test_humidity)
+
+  train_temp = ts(train_temp)
+  test_temp = ts(test_temp)
+```
+
+# Fuzzy Time Series Model
+### (Answer 5)
+
+```{r}
+  #abbasovn10w5 = fuzzy.ts2(train_humidity, n = 10, w = 5, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  #abbasovn10w7 = fuzzy.ts2(train_humidity, n = 10, w = 7, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  #abbasovn10w10 = fuzzy.ts2(train_humidity, n = 10, w = 10, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  #abbasovn15w5 = fuzzy.ts2(train_humidity, n = 15, w = 5, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  #abbasovn15w7 = fuzzy.ts2(train_humidity, n = 15, w = 7, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  abbasovn15w10 = fuzzy.ts2(train_humidity, n = 15, w = 10, C = 0.01, forecast = 96, plot = T, type = 'Abbasov-Mamedova', trace= T)
+  
+  #abbasovn10w5$accuracy
+  #abbasovn10w7$accuracy
+  #abbasovn10w10$accuracy
+  #abbasovn15w5$accuracy
+  #abbasovn15w7$accuracy
+  abbasovn15w10$accuracy
+```
+## Discussion
+### (Answer 5)
+
+The best model amongst all is the one with number of fuzzy sets as 15 and w value as 10 as it has the lowest error. Increasing the number of fuzzy sets has a minor effect on the error, hence, the current best model is taken forward for comparision.  
+
+Given below is the comparision between the forecast from the fuzzy model and the true value.
+
+```{r}
+  plot(ts(abbasovn15w10$table5[2]))
+  plot(test_humidity)
+```
+
+The following observations are made:-   
+  * The output from the fuzzy time series model is linear  
+  * The forecasted values are not even close to the true values  
+  * On the face of it, the fuzzy time series model is not a good representation to forecast/predict  
+  
+# SARIMA Model
+## Visualizing Data
+
+```{r}
+  plot(train_humidity)
+  acf(train_humidity, lag.max=100)
+  pacf(train_humidity, lag.max=100)
+  periodogram(train_humidity)
+```
+
+```{r, eval=FALSE, echo=FALSE}
+  plot(train_temp)
+  acf(train_temp, lag.max = 100)
+  pacf(train_temp, lag.max = 100)
+  periodogram(train_temp)
+```
+
+```{r, echo=TRUE}
+  ccf(train_humidity, train_temp, lag.max = 30)
+```
+### Discussion
+
+* The series does not show any trend or integrating effects (from visual inspection)  
+* ACF and PACF suggest a seasonal component in the data (from visual inspection)  
+* Periodogram confirms the presence of a seasonal component with period = 24(from visual inspection)  
+* (Answer 6) The CCF is oscillatory in behaviour with values being insignificant (below the blue line) when it changes signs. However, for the sake of brevity, those insignificant values are made significant and the entire dataset of temperature is regarded as the exogeneous input (from visual inspection)  
+
+## Unit Root Test
+
+```{r, echo=TRUE}
+  adf.test(train_humidity)
+```
+
+### Discussion
+
+* The Dickey-Fuller coefficient is negative  
+* The null hypothesis is that a unit root is present in the time series  
+* Since, the p-value is less than the significane level of 0.05, the null hypothesis is rejected  
+
+## Time Series Diagnostic Function
+
+```{r}
+  mytsdiag <- function(modarima, Lmax = 30) {
+    # Print summary
+    summary(modarima)
+    # Extract residuals and plot them
+    err_mod <- modarima$residuals
+    N = length(err_mod)
+    # layout(matrix(c(1,2,3),3,1,byrow=TRUE),heights=c(1,1,1))
+    par(mfrow = c(3, 1), mai = c(0.6, 0.7, 0.2, 0.2))
+    plot(scale(err_mod), type = "l", ylab = "Std. resid.", xlab = "")
+    # Compute ACF of residuals
+    acf_err <- acf(err_mod, lag.max = Lmax, main = "", plot = F)
+    lowsig = -1.96/sqrt(N)
+    upsig = 1.96/sqrt(N)
+    plot(acf_err$lag * tsp(err_mod)[3], acf_err$acf, type = "h",
+    main = "", ylab = "ACF of Resid", xlab = "", ylim = c(1.2 *
+    lowsig, 1.2 * upsig))
+    abline(h = upsig, col = "red", lty = "dashed")
+    abline(h = lowsig, col = "red", lty = "dashed")
+    abline(h = 0, col = "black")
+    # Compute BLP statistic
+    blpval <- NULL
+    npar <- sum(modarima$arma[1:4])
+    Lval <- (npar + 1):Lmax
+    for (L in Lval) {
+    blpval <- c(blpval, Box.test(modarima$residuals, lag = L,
+    fitdf = npar)$p.value)
+    }
+    #Plot BLP statistic
+    plot(1:Lmax, c(rep(NA, npar), blpval), ylab = "p-values",
+    xlab = "Lag", ylim = c(0, 1))
+    abline(h = 0.05, col = "red", lty = "dashed")
+}
+```
+
+## Fitting SARIMA Models
+
+```{r, echo=TRUE}
+  #arima_fit_100_100 = arima(train_humidity, order = c(1, 0, 0), seasonal = list(order = c(1, 0, 0), period = 20), xreg = train_temp)
+  #mytsdiag(arima_fit_100_100)
+```
+
+```{r, echo=TRUE}
+  #acf(arima_fit_100_100$residuals)
+```
+
+```{r}
+  #arima_fit_100_100$coef
+  #arima_fit_100_100$sigma2
+  #arima_fit_100_100$aic
+```
+
+```{r}
+  #arima_fit_200_100 = arima(train_humidity, order = c(2, 0, 0), seasonal = list(order = c(1, 0, 0), period = 24), xreg = train_temp)
+  #mytsdiag(arima_fit_200_100)
+```
+
+```{r}
+  #acf(arima_fit_200_100$residuals)
+```
+
+```{r}
+  #arima_fit_200_100$coef
+  #arima_fit_200_100$sigma2
+  #arima_fit_200_100$aic
+```
+
+```{r}
+  #arima_fit_201_200 = arima(train_humidity, order = c(2, 0, 1), seasonal = list(order = c(2, 0, 0), period = 24), xreg = train_temp)
+  #mytsdiag(arima_fit_201_200)
+```
+
+```{r}
+  #acf(arima_fit_201_200$residuals)
+```
+
+```{r}
+  #arima_fit_201_200$coef
+  #arima_fit_201_200$sigma2
+  #arima_fit_201_200$aic
+```
+
+```{r}
+  arima_fit_102_201 = arima(train_humidity, order = c(1, 0, 2), seasonal = list(order = c(2, 0, 1), period = 24), xreg = train_temp)
+  mytsdiag(arima_fit_102_201)
+```  
+  
+```{r}
+  acf(arima_fit_102_201$residuals)
+```
+
+```{r}
+  arima_fit_102_201$coef
+  arima_fit_102_201$sigma2
+  arima_fit_102_201$aic
+```
+
+```{r}
+  #arima_fit_102_202 = arima(train_humidity, order = c(1, 0, 2), seasonal = list(order = c(2, 0, 2), period = 24), xreg = train_temp)
+  #mytsdiag(arima_fit_102_202)
+```
+  
+```{r}
+  #acf(arima_fit_102_202$residuals)
+```
+  
+```{r}
+  #arima_fit_102_202$coef
+  #arima_fit_102_202$sigma2
+  #arima_fit_102_202$aic
+```  
+  
+### Discussion  
+
+(Answer 6)  
+  
+The smallest sigma2(12.73565) and AIC(6488.421) is that of arima(1,0,2)X(2,0,1)_{24}. Hence, this is taken to be the best model amongst the rest and is carried forward.
+
+
+# Forecasting  
+  
+```{r}
+  pred_sarima = predict(arima_fit_102_201, newxreg = test_temp)
+  pred_sarima_train = predict(arima_fit_102_201, newxreg = train_temp)
+```
+
+```{r, echo=FALSE, eval=FALSE}
+  plot(pred_sarima$pred)
+  plot(pred_sarima_train$pred)
+```
+
+## On Training Data
+```{r}
+  plot(abbasovn15w10$table2$ts)
+  plot(pred_sarima_train$pred)
+  plot(train_humidity)
+```
+
+## On Test Data
+```{r}
+  plot(ts(abbasovn15w10$table5[2]))
+  plot(pred_sarima$pred)
+  plot(test_humidity)
+```
+
+### Discussion
+
+* On the training set, the fuzzy model outshines the sarima model (from visual inspection)  
+* On the test set, the fuzzy model performs poorly in comparison to the sarima model (from visual inspection)  
+* Taking into account both the factors, the fuzzy model overfits  
+* (Answer 7) Hence, the sarima model is the better of the two due to the fact that it has better forecasting capabilities as well as it does not overfit
+
+#Interpolating
+
+```{r}
+  humidity_interpolated = arima.sim(list(ar=c(0.903), ma=c(-0.065, -0.0987), sar=c(1.021, -0.033), sma=c(-0.944)),n=1200)
+  
+  for(ii in seq(1,1200)){
+    if(is.na(non_imputed_humidity[ii])){
+      non_imputed_humidity[ii] = humidity_interpolated[ii]
+    }
+  }
+  
+  imputed_humidity = non_imputed_humidity[1:1200]
+  
+  arima_fit_102_201_interpolated = arima(imputed_humidity, order = c(1, 0, 2), seasonal = list(order = c(2, 0, 1), period = 24), xreg = train_temp)
+  mytsdiag(arima_fit_102_201_interpolated)
+```
+
+```{r}
+  acf(arima_fit_102_201_interpolated$residuals)
+```
+
+```{r}
+  arima_fit_102_201_interpolated$coef
+  arima_fit_102_201_interpolated$sigma2
+  arima_fit_102_201_interpolated$aic
+```
+
+### Discussion (Answer 8)
+
+* Non Interpolated SARIMA(1,0,2)X(2,0,1)_{24} - sigma2(12.73565) : AIC(6488.421)  
+* Interpolated SARIMA(1,0,2)X(2,0,1)_{24} - sigma2(129.5781) : AIC(9259.855)   
+* The non interpolated model is better due to lower AIC and sigma2 as compared to the interpolated model  
+* This is because when the model is interpolated to fill in the missing values of humidity, the cross correlation with temperature goes down rendering them ineffective to build a better model
+
+```{r}
+  pred_sarima_interpolated = predict(arima_fit_102_201_interpolated, newxreg = test_temp)
+```
+
+```{r, echo=FALSE}
+  plot(pred_sarima_interpolated$pred)
+```
+
+```{r}
+  plot(pred_sarima_interpolated$pred)
+  plot(pred_sarima$pred)
+  plot(test_humidity)
+```
+
+### Discussion
+
+* The plots of the forecasts for the non interpolated model and the interpolated model look the same
